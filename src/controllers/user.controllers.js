@@ -20,8 +20,10 @@ const generateAccessAndRefreshToken = async (userId) => {
     const accessToken = user.generateAccessToken();
     const refreshToken = user.generateRefreshToken();
 
-    //???
+    //assigns the newly generated refreshToken (from user.generateRefreshToken()) 
+    //to the refreshToken field of the user document in the database.
     user.refreshToken = refreshToken;
+    //This line saves the user document with the updated refreshToken back to the MongoDB database.
     await user.save({ validateBeforeSave: false });
     return { accessToken, refreshToken };
   } catch (error) {
@@ -158,53 +160,84 @@ const loginUser = asyncHandler(async (req, res) => {
     );
 });
 
-// const logoutUser = asyncHandler( async(req, res)=>{
-//   await User.findByIdAndUpdate(
-//     //need to come back here after middleware video
-//   )
-// })
+const logoutUser = asyncHandler( async(req, res)=>{
+  //Why cant we just request stuff from the body like we did in other controllers like loginUser and registerUser
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    {
+      $set:{
+        refreshToken: undefined 
+      }
+    },
+    //new is used to return new/fresh information that we changed
+    {new: true}
+  )
+  const loggedOutUser = await User.findById(user._id).select("-password -refreshToken")
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production"
+  }
+  return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json( new ApiResponse(200, loggedOutUser, "User logged out successfully"))
+})
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
+  //this is coming from client side
   const incomingRefreshToken =
     req.cookies.refreshToken || req.body.refreshToken;
-
   if (!incomingRefreshToken) {
     throw new ApiError(401, " Refresh token is required");
   }
 
   try {
+    //we get the payload that was encoded in the refreshToken i.e _id
     const decodedToken = jwt.verify(
       incomingRefreshToken,
       process.env.REFRESH_TOKEN_SECRET
     );
-    const user = await User.findById(decodedToken?._id);
-    if (!user) {
-      throw new ApiError(401, "Invalid Refresh Token");
-    }
-    if (incomingRefreshToken !== user?.refreshToken) {
-      throw new ApiError(401, "Invalid Refresh Token");
-    }
+ 
 
+    const user = await User.findById(decodedToken?._id);
+
+
+    if (!user) {
+      throw new ApiError(401, "Invalid Refresh Token - User not found");
+    }
+    
+    if (user.refreshToken === undefined) {
+      throw new ApiError(401, "User's refresh token not found in the database");
+    }
+    
+    if (incomingRefreshToken !== user.refreshToken) {
+      throw new ApiError(401, "Invalid Refresh Token - Token mismatch");
+    }
     const options = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
     };
 
+
+    //what is old refresh token and what is new refresh token?
     const { accessToken, refreshToken: newRefreshToken } =
       await generateAccessAndRefreshToken(user._id);
+
 
     return res
       .status(200)
       .cookie("accessToken", accessToken, options)
-      .cookie("refreshToken", refreshToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
       .json(
         new ApiResponse(
           200,
-          { accessToken, refreshToken: newRefreshToken },
+          { accessToken, refreshToken: newRefreshToken }, //why did we write it like this?
           "Access token refreshed successfully"
         )
       );
   } catch (error) {
+    console.error("Error refreshing access token:", error);
     throw new ApiError(
       500,
       "Something went wrong while refreshing acess token"
@@ -212,4 +245,4 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   }
 });
 
-export { registerUser, loginUser, refreshAccessToken };
+export { registerUser, loginUser, logoutUser, refreshAccessToken };
