@@ -20,9 +20,10 @@ export const verifyJWT = asyncHandler( async(req, _, next)=>{
         if(!user){
             throw new ApiError(404, "User not found")
         }
-        //what is req.user is it coming from the client side and if it is how are we 
-        //adding/appending data to it? How does it work
+    //    attaching the authenticated user's data (retrieved from the database) to the req (request) object.
+    // This allows you to make the authenticated user's information available throughout the rest of the request's lifecycle.
         req.user = user
+       
 
         next()
     } catch (error) {
